@@ -6,6 +6,10 @@
 import streamlit as st
 from datetime import date, timedelta, datetime
 import requests
+import urllib3
+
+# SSL 경고 메시지 방지
+urllib3.disable_warnings(urllib3.exceptions.InsecurePlatformWarning)
 
 # ──────────────────────────────── API 설정 ──────────────────────────────── #
 # 나이스 Open API 공식 Endpoint (학사일정)
@@ -42,7 +46,7 @@ def fetch_school_schedule(search_date: date) -> list:
     }
     
     try:
-        response = requests.get(NICE_API_URL, params=params, timeout=5)
+        response = requests.get(NICE_API_URL, params=params, timeout=5, verify=False)
         if response.status_code == 200:
             data = response.json()
             
@@ -144,3 +148,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
