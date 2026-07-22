@@ -185,6 +185,7 @@ def render_chatbot_page():
             st.markdown(message["content"])
 
     if prompt := st.chat_input("질문을 입력하세요..."):
+        print("")
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)

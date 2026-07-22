@@ -13,11 +13,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ──────────────────────────────── API 설정 ──────────────────────────────── #
 NICE_API_URL = "https://open.neis.go.kr/hub/SchoolSchedule"
-ATPT_OFCDC_SC_CODE = "G10"  # 대전광역시교육청
-SD_SCHUL_CODE = "7430310"    # 대덕소프트웨어마이스터고등학교
+ATPT_OFCDC_SC_CODE = "G10"  # 대전광역시교육청 코드
+SD_SCHUL_CODE = "7430310"    # 대덕소프트웨어마이스터고등학교 코드
 API_KEY = ""                 # 나이스 API 키 (선택)
 
 
+# 특정 연/월의 학사일정 조회 함수
 def fetch_monthly_schedule(year: int, month: int) -> list:
     """특정 연월(YYYYMM)의 학사일정을 조회합니다."""
     ym_str = f"{year}{month:02d}"
