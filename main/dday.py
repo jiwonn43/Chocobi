@@ -2,7 +2,7 @@
 = 대덕소프트웨어마이스터고등학교 D-Day 모듈 =
 🍫 팀명: 초코비 / 개발자: 윤지원, 이가영
 """
-
+# streamlit:웹화면 | datetime:날짜계산 | requests:나이스 서버 통신
 import streamlit as st
 from datetime import date, datetime
 import requests
@@ -97,21 +97,6 @@ def get_all_upcoming_events(today: date) -> list:
             "date": start_date
         })
 
-    # API 결과 보완용 기본 예비 일정
-    fallback_events = [
-        {"id": "mid_2", "title": "📝 2학기 중간고사", "raw_title": "2학기 중간고사", "date": date(today.year, 10, 15)},
-        {"id": "proj_1", "title": "💡 프로젝트 발표회", "raw_title": "프로젝트 발표회", "date": date(today.year, 11, 20)},
-        {"id": "final_2", "title": "📝 2학기 기말고사", "raw_title": "2학기 기말고사", "date": date(today.year, 12, 14)},
-        {"id": "vacation", "title": "🎄 겨울방학식", "raw_title": "겨울방학식", "date": date(today.year, 12, 24)},
-        {"id": "sports", "title": "🏃 교내 체육대회", "raw_title": "체육대회", "date": date(today.year, 10, 5)},
-        {"id": "festival", "title": "🎉 초코비 축제", "raw_title": "축제", "date": date(today.year, 11, 5)},
-    ]
-
-    existing_ids = {ev["id"] for ev in filtered_events}
-    for fb in fallback_events:
-        if fb["date"] >= today and fb["id"] not in existing_ids:
-            filtered_events.append(fb)
-
     return filtered_events
 
 
@@ -177,8 +162,9 @@ def render_dday_page():
 
     dday_events = get_dday_list(today)
 
+    # API 응답 결과가 없거나 실패 시 예비 데이터 대신 안내 문구만 표시
     if not dday_events:
-        st.info("현재 등록된 다가오는 학사일정이 없습니다.")
+        st.warning("⚠️ 학사일정 API 데이터를 불러오지 못했거나 등록된 일정이 없습니다.")
         return
 
     for event in dday_events:
