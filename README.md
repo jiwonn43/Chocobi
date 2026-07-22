@@ -1,6 +1,9 @@
 # 초코비 - 학사일정 서비스
 **학사일정 AI 챗봇 & D-Day 서비스**
 
+## 배포 URL
+https://chocobi-fusdyjvclmsjetpndtxx7f.streamlit.app/
+
 ## 팀원
 | 윤지원 | 이가영 |
 
