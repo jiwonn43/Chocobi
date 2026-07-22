@@ -4,10 +4,11 @@
 """
 from dday import get_dday_list
 import streamlit as st
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 import requests
 import urllib3
 import ollama
+import json
 
 # SSL 경고 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -19,7 +20,6 @@ ATPT_OFCDC_SC_CODE = "G10"  # 대전광역시교육청
 SD_SCHUL_CODE = "7430310"    # 대덕소프트웨어마이스터고등학교
 API_KEY = ""                 # 나이스 API 키 (선택)
 
-# 🤖 컴퓨터에 설치된 로컬 AI 모델명
 LOCAL_MODEL_NAME = "gemma4"
 
 
@@ -31,136 +31,134 @@ st.set_page_config(
 )
 
 
-# ──────────────────────────────── API 호출 함수 ──────────────────────────────── #
-def fetch_single_day_schedule(target_date: date) -> list:
-    """하루 치 학사일정을 조회합니다."""
-    date_str = target_date.strftime("%Y%m%d")
+# ──────────────────────────────── 나이스 API 데이터 호출 ──────────────────────────────── #
+def fetch_raw_schedule(from_ymd: str, to_ymd: str) -> list:
+    """지정한 기간 사이의 전체 학사일정을 가져옵니다."""
     params = {
         "KEY": API_KEY,
         "Type": "json",
         "pIndex": 1,
-        "pSize": 100,
+        "pSize": 1000,
         "ATPT_OFCDC_SC_CODE": ATPT_OFCDC_SC_CODE,
         "SD_SCHUL_CODE": SD_SCHUL_CODE,
-        "AA_YMD": date_str
+        "AA_FROM_YMD": from_ymd,
+        "AA_TO_YMD": to_ymd
     }
+
+    records = []
     try:
-        response = requests.get(NICE_API_URL, params=params, timeout=3, verify=False)
+        response = requests.get(NICE_API_URL, params=params, timeout=5, verify=False)
         if response.status_code == 200:
             data = response.json()
             if "SchoolSchedule" in data:
                 for item in data["SchoolSchedule"]:
                     if "row" in item:
-                        return [row["EVENT_NM"] for row in item["row"] if "EVENT_NM" in row]
+                        for row in item["row"]:
+                            event_date = row.get("AA_YMD", "")
+                            event_nm = row.get("EVENT_NM", "")
+                            if event_date and event_nm:
+                                formatted_date = f"{event_date[:4]}-{event_date[4:6]}-{event_date[6:]}"
+                                records.append(f"- {formatted_date}: {event_nm}")
     except Exception:
         pass
-    return []
+    return records
 
 
-def fetch_schedule_range(start_date: date, end_date: date) -> str:
-    """지정한 날짜 범위의 학사일정 텍스트를 생성합니다."""
-    records = []
-    curr = start_date
-    while curr <= end_date:
-        events = fetch_single_day_schedule(curr)
-        date_str = curr.strftime("%Y-%m-%d(%a)")
-        if events:
-            records.append(f"- {date_str}: {', '.join(events)}")
-        else:
-            records.append(f"- {date_str}: 일정 없음")
-        curr += timedelta(days=1)
-    return "\n".join(records)
-
-
-# ──────────────────────────────── 날짜 계산 전담 함수 (Python) ──────────────────────────────── #
-def determine_target_date_range(user_text: str) -> tuple[date, date, str]:
-    """사용자 질문을 분석하여 정확한 (시작일, 종료일, 범위 설명)을 계산합니다."""
+# ──────────────────────────────── 1단계: AI 질문 분석 (조회 범위만 설정) ──────────────────────────────── #
+def parse_user_intent_with_ai(user_question: str) -> dict:
     today = date.today()
-    text = user_text.strip().lower()
-
-    weekdays = {"월": 0, "화": 1, "수": 2, "목": 3, "금": 4, "토": 5, "일": 6}
-
-    # 1. '저번주' / '지난주'
-    if "저번주" in text or "저번 주" in text or "지난주" in text or "지난 주" in text:
-        last_week_monday = today - timedelta(days=today.weekday() + 7)
-        
-        for day_name, day_code in weekdays.items():
-            if f"{day_name}요일" in text or f"{day_name}욜" in text:
-                target = last_week_monday + timedelta(days=day_code)
-                return target, target, f"저번주 {day_name}요일({target.strftime('%Y-%m-%d')})"
-        
-        last_week_sunday = last_week_monday + timedelta(days=6)
-        return last_week_monday, last_week_sunday, f"저번주({last_week_monday.strftime('%Y-%m-%d')} ~ {last_week_sunday.strftime('%Y-%m-%d')})"
-
-    # 2. '다음주'
-    if "다음주" in text or "다음 주" in text:
-        next_week_monday = today + timedelta(days=(7 - today.weekday()))
-        
-        for day_name, day_code in weekdays.items():
-            if f"{day_name}요일" in text or f"{day_name}욜" in text:
-                target = next_week_monday + timedelta(days=day_code)
-                return target, target, f"다음주 {day_name}요일({target.strftime('%Y-%m-%d')})"
-        
-        next_week_sunday = next_week_monday + timedelta(days=6)
-        return next_week_monday, next_week_sunday, f"다음주({next_week_monday.strftime('%Y-%m-%d')} ~ {next_week_sunday.strftime('%Y-%m-%d')})"
-
-    # 3. '이번주'
-    if "이번주" in text or "이번 주" in text or "주간" in text:
-        this_week_monday = today - timedelta(days=today.weekday())
-        
-        for day_name, day_code in weekdays.items():
-            if f"{day_name}요일" in text or f"{day_name}욜" in text:
-                target = this_week_monday + timedelta(days=day_code)
-                return target, target, f"이번주 {day_name}요일({target.strftime('%Y-%m-%d')})"
-        
-        this_week_sunday = this_week_monday + timedelta(days=6)
-        return this_week_monday, this_week_sunday, f"이번주({this_week_monday.strftime('%Y-%m-%d')} ~ {this_week_sunday.strftime('%Y-%m-%d')})"
-
-    # 4. 상대 단어 처리
-    if "어제" in text:
-        target = today - timedelta(days=1)
-        return target, target, f"어제({target.strftime('%Y-%m-%d')})"
-    elif "내일" in text:
-        target = today + timedelta(days=1)
-        return target, target, f"내일({target.strftime('%Y-%m-%d')})"
-    elif "모레" in text:
-        target = today + timedelta(days=2)
-        return target, target, f"모레({target.strftime('%Y-%m-%d')})"
-
-    # 기본값: 오늘 기준 이번 주 전체
-    this_week_monday = today - timedelta(days=today.weekday())
-    this_week_sunday = this_week_monday + timedelta(days=6)
-    return this_week_monday, this_week_sunday, f"이번주({this_week_monday.strftime('%Y-%m-%d')} ~ {this_week_sunday.strftime('%Y-%m-%d')})"
-
-
-# ──────────────────────────────── AI 답변 생성 (간결성 극대화) ──────────────────────────────── #
-def ask_ai_with_context(user_question: str) -> str:
-    """인사말 및 부연 설명 없이 오직 학사일정만 간결하게 출력합니다."""
-    today = date.today()
-    start_date, end_date, date_label = determine_target_date_range(user_question)
-    schedule_data = fetch_schedule_range(start_date, end_date)
+    current_year = today.year
 
     prompt = f"""
-너는 학사일정 정보만 정확히 전달하는 출력 시스템이다.
+너는 학생 질문에서 학사일정 API를 조회할 시작일(AA_FROM_YMD)과 종료일(AA_TO_YMD) 범위만 추출하는 파서다.
 
-[조회 기간]
-{date_label}
+[오늘 날짜]: {today.strftime('%Y-%m-%d')}
 
-[조회된 학사일정 데이터]
+[검색 범위 지침]
+- 1학기 관련 질문: {current_year}0301 ~ {current_year}0731
+- 2학기 관련 질문: {current_year}0801 ~ {current_year+1}0228
+- 특정 월(예: 6월): 해당 월의 1일 ~ 말일 (예: {current_year}0601 ~ {current_year}0630)
+- 지정이 없는 경우: {current_year}0301 ~ {current_year+1}0228
+
+[학생 질문]: "{user_question}"
+
+다음 JSON 형식으로만 답해라 (다른 텍스트 금지):
+{{
+  "AA_FROM_YMD": "YYYYMMDD",
+  "AA_TO_YMD": "YYYYMMDD"
+}}
+"""
+
+    try:
+        response = ollama.generate(
+            model=LOCAL_MODEL_NAME, 
+            prompt=prompt,
+            format="json"
+        )
+        data = json.loads(response['response'])
+        if "AA_FROM_YMD" in data and "AA_TO_YMD" in data:
+            return data
+    except Exception:
+        pass
+
+    # Fallback 로직
+    text = user_question.lower()
+    from_ymd = f"{current_year}0301"
+    to_ymd = f"{current_year+1}0228"
+
+    if "2학기" in text:
+        from_ymd = f"{current_year}0801"
+        to_ymd = f"{current_year+1}0228"
+    elif "1학기" in text:
+        from_ymd = f"{current_year}0301"
+        to_ymd = f"{current_year}0731"
+
+    return {"AA_FROM_YMD": from_ymd, "AA_TO_YMD": to_ymd}
+
+
+# ──────────────────────────────── 2단계: AI 답변 통합 제어 ──────────────────────────────── #
+def ask_ai_with_context(user_question: str) -> str:
+    today = date.today()
+    text = user_question.strip().lower()
+
+    # 1. 단기 상대 날짜 사전 처리
+    if "오늘" in text:
+        from_ymd = to_ymd = today.strftime("%Y%m%d")
+    elif "내일" in text:
+        from_ymd = to_ymd = (today + timedelta(days=1)).strftime("%Y%m%d")
+    elif "어제" in text:
+        from_ymd = to_ymd = (today - timedelta(days=1)).strftime("%Y%m%d")
+    elif "모레" in text:
+        from_ymd = to_ymd = (today + timedelta(days=2)).strftime("%Y%m%d")
+    else:
+        intent = parse_user_intent_with_ai(user_question)
+        from_ymd = intent.get("AA_FROM_YMD", today.strftime("%Y0301"))
+        to_ymd = intent.get("AA_TO_YMD", today.strftime("%Y1231"))
+
+    # 2. 지정된 기간 동안의 전체 학사일정 가져오기 (키워드 필터링 안 함!)
+    raw_events = fetch_raw_schedule(from_ymd, to_ymd)
+    schedule_data = "\n".join(raw_events) if raw_events else "등록된 학사일정이 없습니다."
+
+    # 3. AI가 전체 학사일정에서 질문에 답을 찾아 전달
+    final_prompt = f"""
+너는 학사일정을 안내하는 AI다. 
+
+[학교 학사일정 전체 목록]
 {schedule_data}
 
 [학생 질문]
 "{user_question}"
 
-[출력 규칙 - 엄격 준수]
-1. "안녕하세요", "요청하신 내용입니다", "감사합니다" 등의 인사말, 서론, 결론을 절대 포함하지 마라.
-2. 질문에 해당하는 날짜의 학사일정 정보만 마크다운 목록 형태(- )로 바로 출력해라.
-3. 일정이 없는 경우 "등록된 학사일정이 없습니다." 한 줄만 출력해라.
-4. 오직 날짜와 학사일정 내용만 간결하게 핵심만 답변해라.
+[답변 작성 지침]
+1. [학교 학사일정 전체 목록]을 확인하고, 학생이 물어본 일정(중간고사, 기말고사, 지필평가, 시험, 방학 등)과 관련된 모든 일자를 찾아서 답변해라.
+2. 고등학교 학사일정에서 '중간고사', '기말고사'는 '지필평가', '1차 평가', '고사' 등으로 등록되어 있을 수 있으니 문맥에 맞게 찾아라.
+3. 해당하는 일정이 있으면 일자를 마크다운 리스트(- YYYY-MM-DD: 일정명)로 모두 나열해라.
+4. 만약 검색된 학사일정 전체 목록 내에 관련된 행사가 전혀 없다면 "등록된 학사일정이 없습니다."라고 답해라.
+5. 인사말이나 쓸데없는 설명 없이 정답 목록만 짧게 출력해라.
 """
 
     try:
-        response = ollama.generate(model=LOCAL_MODEL_NAME, prompt=prompt)
+        response = ollama.generate(model=LOCAL_MODEL_NAME, prompt=final_prompt)
         return response['response'].strip()
     except Exception as e:
         return f"AI 응답 생성 중 오류가 발생했습니다: {e}"
@@ -179,7 +177,7 @@ def render_chatbot_page():
 
     if "messages" not in st.session_state:
         st.session_state.messages = [
-            {"role": "assistant", "content": "🍫 **초코비 학사일정 챗봇**입니다.\n조회하고 싶은 날짜나 기간을 입력해주세요."}
+            {"role": "assistant", "content": "🍫 **초코비 학사일정 챗봇**입니다.\n조회하고 싶은 날짜나 기간, 학사일정(기말고사, 방학 등)을 입력해주세요."}
         ]
 
     for message in st.session_state.messages:
@@ -192,7 +190,7 @@ def render_chatbot_page():
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner("🍫 학사일정 확인 중..."):
+            with st.spinner("🍫 학사일정 분석 및 조회 중..."):
                 response = ask_ai_with_context(prompt)
 
             st.markdown(response)
@@ -247,7 +245,7 @@ def render_dday_page():
         st.divider()
 
 
-# ──────────────────────────────── 메인 제어 (사이드바 버튼 내비게이션) ──────────────────────────────── #
+# ──────────────────────────────── 메인 제어 ──────────────────────────────── #
 def main():
     if "nav_page" not in st.session_state:
         st.session_state.nav_page = "chatbot"
